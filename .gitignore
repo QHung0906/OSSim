@@ -1,0 +1,39 @@
+# Compiled Object files
+*.o
+*.obj
+obj/
+
+# Executables & Binaries
+os
+os.exe
+sched
+mem
+dma_testbench
+*.exe
+*.out
+*.vcd
+*.lst
+
+# Course specification & documents (DO NOT push to GitHub)
+*.pdf
+*.docx
+*.pptx
+
+# Archives and Submissions
+*.zip
+*.tar.gz
+*.rar
+assignment_*.zip
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary/Output files
+output/*.log
+output/*.tmp
+
