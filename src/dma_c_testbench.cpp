@@ -127,27 +127,29 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
     return result;
 }
 
+static std::atomic<bool> dma_busy(false);
+extern "C" pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /*
  * do_dma - perform DMA function
  * source: source memory
  * destination: destination memory
  * length: number of bytes to copy
  */
-extern "C" int do_dma(struct pcb_t *caller,uint64_t source, uint64_t destination, uint64_t length) {
-    
-    int test_errors = 0;
+extern "C" int do_dma(struct pcb_t *caller, uint64_t source, uint64_t destination, uint64_t length) {
+    if (dma_busy) {
+        return -1;
+    }
 
-    /* Perform DMA copy using DPI with provided caller and parameters */
-    test_errors += dpi_dma_copy(caller, source, destination, length);
+    dma_busy = true;
 
-    /*
-     * TODO: This asynchronous implementation of DMA
-     *        DMA completion callback is not yet implemented in this testbench
-     */
-    // Install callback handler
-    //dma_done_callback();  // Call the callback to signal DMA completion
+    std::thread dma_thread([caller, source, destination, length]() {
+        dpi_dma_copy(caller, source, destination, length);
+        dma_busy = false;
+    });
+    dma_thread.detach();
 
-    return test_errors;
+    return 0;
 }
 
 #if DMA_MAIN == 1
@@ -203,6 +205,10 @@ int main(int argc, char** argv) {
     caller->pid = 0;  // Set a default PID
 
     int result = do_dma(caller, source, destination, length);
+
+    while (dma_busy) {
+        std::this_thread::yield();
+    }
 
     // Cleanup
     free(caller->krnl->active_mswp);

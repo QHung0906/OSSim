@@ -13,6 +13,7 @@
 #define __DMA_H__
 
 #include <stdint.h>
+#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,8 @@ extern "C" {
 
 /* Forward declaration */
 struct pcb_t;
+
+extern pthread_mutex_t dma_lock;
 
 /*
  * do_dma - perform DMA function
