@@ -153,11 +153,14 @@ int MEMPHY_format(struct memphy_struct *mp, int pagesz)
 
 int MEMPHY_get_freefp(struct memphy_struct *mp, addr_t *retfpn)
 {
+   if (mp == NULL || mp->free_fp_list == NULL || retfpn == NULL)
+      return -1;
    struct framephy_struct *fp = mp->free_fp_list;
 
    if (fp == NULL)
       return -1;
-
+*retfpn = fp->fpn;
+mp->free_fp_list = fp->fp_next;
    /* 
     * TODO manage free frame list
     */
@@ -175,11 +178,20 @@ int MEMPHY_get_freefp(struct memphy_struct *mp, addr_t *retfpn)
 
 int MEMPHY_dump(struct memphy_struct *mp)
 {
+   if (mp == NULL || mp->storage == NULL)
+      return -1;
+      for (int i = 0; i < mp->maxsz; i++)
+   {
+      if (i % 16 == 0)
+         printf("\n0x%08x: ", i);
+
+      printf("%02x ", (unsigned char)mp->storage[i]);
+   }
   /*
    * TODO dump memphy contnt mp->storage
    *     for tracing the memory content
    */
-
+printf("\n");
    return 0;
 }
 
