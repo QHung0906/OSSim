@@ -78,6 +78,12 @@ int get_pd_from_address(addr_t addr, addr_t* pgd, addr_t* p4d, addr_t* pud, addr
 	*pt = (addr&PAGING64_ADDR_PT_MASK)>>PAGING64_ADDR_PT_LOBIT;
 
 	/* TODO: implement the page direactories mapping */
+  if (((addr >> (PAGING64_ADDR_PGD_HIBIT + 1)) != 0) &&
+      ((addr >> (PAGING64_ADDR_PGD_HIBIT + 1)) !=
+  (((addr_t)1 << (64 - PAGING64_ADDR_PGD_HIBIT - 1)) - 1)))
+    return -1;
+  if (*pgd >= 512 || *p4d >= 512 || *pud >= 512 || *pmd >= 512 || *pt >= 512)
+    return -1;
 
 	return 0;
 }
@@ -121,6 +127,30 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 #ifdef MM64	
   /* Get value from the system */
   /* TODO Perform multi-level page mapping */
+  free(pte);
+  struct mm_struct *mm = caller->mm;
+  addr_t *p4d_table;
+  addr_t *pud_table;
+  addr_t *pmd_table;
+  addr_t *pt_table;
+  if (mm == NULL || get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt) != 0)
+    return -1;
+  if (mm->pgd == NULL) mm->pgd = calloc(512, sizeof(addr_t));
+  if (mm->pgd == NULL)
+    return -1;
+  if (mm->pgd[pgd] == 0) mm->pgd[pgd] = (addr_t)calloc(512, sizeof(addr_t));
+  p4d_table = (addr_t *)mm->pgd[pgd];
+  if (p4d_table == NULL) return -1;
+  if (p4d_table[p4d] == 0) p4d_table[p4d] = (addr_t)calloc(512, sizeof(addr_t));
+  pud_table = (addr_t *)p4d_table[p4d];
+  if (pud_table == NULL) return -1;
+  if (pud_table[pud] == 0) pud_table[pud] = (addr_t)calloc(512, sizeof(addr_t));
+  pmd_table = (addr_t *)pud_table[pud];
+  if (pmd_table == NULL) return -1;
+  if (pmd_table[pmd] == 0) pmd_table[pmd] = (addr_t)calloc(512, sizeof(addr_t));
+  pt_table = (addr_t *)pmd_table[pmd];
+  if (pt_table == NULL) return -1;
+  pte = &pt_table[pt];
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
   //... krnl->mm->pgd
   //... krnl->mm->pt
@@ -160,6 +190,29 @@ int pte_set_fpn(struct mm_struct *mm, addr_t pgn, addr_t fpn, struct pcb_t *call
 #ifdef MM64	
   /* Get value from the system */
   /* TODO Perform multi-level page mapping */
+  free(pte);
+  addr_t *p4d_table;
+  addr_t *pud_table;
+  addr_t *pmd_table;
+  addr_t *pt_table;
+  if (mm == NULL || get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt) != 0)
+    return -1;
+  if (mm->pgd == NULL) mm->pgd = calloc(512, sizeof(addr_t));
+  if (mm->pgd == NULL)
+    return -1;
+  if (mm->pgd[pgd] == 0) mm->pgd[pgd] = (addr_t)calloc(512, sizeof(addr_t));
+  p4d_table = (addr_t *)mm->pgd[pgd];
+  if (p4d_table == NULL) return -1;
+  if (p4d_table[p4d] == 0) p4d_table[p4d] = (addr_t)calloc(512, sizeof(addr_t));
+  pud_table = (addr_t *)p4d_table[p4d];
+  if (pud_table == NULL) return -1;
+  if (pud_table[pud] == 0) pud_table[pud] = (addr_t)calloc(512, sizeof(addr_t));
+  pmd_table = (addr_t *)pud_table[pud];
+  if (pmd_table == NULL) return -1;
+  if (pmd_table[pmd] == 0) pmd_table[pmd] = (addr_t)calloc(512, sizeof(addr_t));
+  pt_table = (addr_t *)pmd_table[pmd];
+  if (pt_table == NULL) return -1;
+  pte = &pt_table[pt];
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
   //... krnl->mm->pgd
   //... krnl->mm->pt
@@ -199,6 +252,24 @@ addr_t pte_get_entry(struct mm_struct *mm, addr_t pgn, struct pcb_t *caller)
 #ifdef MM64	
   /* Get value from the system */
   /* TODO Perform multi-level page mapping */
+  free(pte);
+  addr_t *p4d_table;
+  addr_t *pud_table;
+  addr_t *pmd_table;
+  addr_t *pt_table;
+  if (mm == NULL || get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt) != 0 ||
+      mm->pgd == NULL)
+    return 0;
+  p4d_table = (addr_t *)mm->pgd[pgd];
+  if (p4d_table == NULL) return 0;
+  pud_table = (addr_t *)p4d_table[p4d];
+  if (pud_table == NULL) return 0;
+  pmd_table = (addr_t *)pud_table[pud];
+  if (pmd_table == NULL) return 0;
+  pt_table = (addr_t *)pmd_table[pmd];
+  if (pt_table == NULL) return 0;
+  pte = &pt_table[pt];
+  return *pte;
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
   //... krnl->mm->pgd
   //... krnl->mm->pt
@@ -231,6 +302,29 @@ int pte_set_entry(struct mm_struct *mm, addr_t pgn, uint64_t pte_val, struct pcb
 #ifdef MM64	
   /* Get value from the system */
   /* TODO Perform multi-level page mapping */
+  free(pte);
+  addr_t *p4d_table;
+  addr_t *pud_table;
+  addr_t *pmd_table;
+  addr_t *pt_table;
+  if (mm == NULL || get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt) != 0)
+    return -1;
+  if (mm->pgd == NULL) mm->pgd = calloc(512, sizeof(addr_t));
+  if (mm->pgd == NULL)
+    return -1;
+  if (mm->pgd[pgd] == 0) mm->pgd[pgd] = (addr_t)calloc(512, sizeof(addr_t));
+  p4d_table = (addr_t *)mm->pgd[pgd];
+  if (p4d_table == NULL) return -1;
+  if (p4d_table[p4d] == 0) p4d_table[p4d] = (addr_t)calloc(512, sizeof(addr_t));
+  pud_table = (addr_t *)p4d_table[p4d];
+  if (pud_table == NULL) return -1;
+  if (pud_table[pud] == 0) pud_table[pud] = (addr_t)calloc(512, sizeof(addr_t));
+  pmd_table = (addr_t *)pud_table[pud];
+  if (pmd_table == NULL) return -1;
+  if (pmd_table[pmd] == 0) pmd_table[pmd] = (addr_t)calloc(512, sizeof(addr_t));
+  pt_table = (addr_t *)pmd_table[pmd];
+  if (pt_table == NULL) return -1;
+  pt_table[pt] = (addr_t)pte_val;
   get_pd_from_pagenum(pgn, &pgd, &p4d, &pud, &pmd, &pt);
   //... krnl->mm->pgd
   //... krnl->mm->pt
