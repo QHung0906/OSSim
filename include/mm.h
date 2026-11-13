@@ -98,9 +98,8 @@ extern "C" {
 #define PAGING_PTE_SWPTYP(pte)  GETVAL(pte, PAGING_PTE_SWPTYP_MASK, PAGING_PTE_SWPTYP_LOBIT)
 
 /* Memory range operator */
-/* TODO implement the INCLUDE and OVERLAP checking mechanism */
-#define INCLUDE(x1,x2,y1,y2) (0)
-#define OVERLAP(x1,x2,y1,y2) (0)
+#define INCLUDE(x1, x2, y1, y2) ((x1 <= y1 && y2 <= x2) || (y1 <= x1 && x2 <= y2))
+#define OVERLAP(x1, x2, y1, y2) (x1 < y2 && y1 < x2)
 
 /* VM region prototypes */
 struct vm_rg_struct * init_vm_rg(addr_t rg_start, addr_t rg_end);
