@@ -230,5 +230,57 @@ int init_memphy(struct memphy_struct *mp, addr_t max_size, int randomflg)
 
    return 0;
 }
+int find_victim_page(struct mm_struct *mm, addr_t *pgn)
+{
+   if (mm == NULL || pgn == NULL)
+      return -1;
 
+   if (mm->fifo_pgn == NULL)
+      return -1;
+
+   struct pgn_t *victim = mm->fifo_pgn;
+   *pgn = victim->pgn;
+   mm->fifo_pgn = victim->pg_next;
+
+   free(victim);
+
+   return 0;
+}
+
+int __swap_cp_page(struct memphy_struct *mpsrc, addr_t srcfpn,
+                   struct memphy_struct *mpdst, addr_t dstfpn)
+{
+   if (mpsrc == NULL || mpdst == NULL)
+      return -1;
+
+   if (mpsrc->storage == NULL || mpdst->storage == NULL)
+      return -1;
+
+#ifdef MM64
+   addr_t pgsz = PAGING64_PAGESZ;
+#else
+   addr_t pgsz = PAGING_PAGESZ;
+#endif
+
+   addr_t src_off = srcfpn * pgsz;
+   addr_t dst_off = dstfpn * pgsz;
+
+   if (src_off + pgsz > (addr_t)mpsrc->maxsz)
+      return -1;
+
+   if (dst_off + pgsz > (addr_t)mpdst->maxsz)
+      return -1;
+
+   addr_t i;
+   BYTE value;
+   for (i = 0; i < pgsz; i++)
+   {
+      if (MEMPHY_read(mpsrc, src_off + i, &value) != 0)
+         return -1;
+      if (MEMPHY_write(mpdst, dst_off + i, value) != 0)
+         return -1;
+   }
+
+   return 0;
+}
 // #endif
