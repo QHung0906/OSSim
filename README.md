@@ -109,6 +109,52 @@ Mục tiêu Tuần 2: Lập trình lõi thuật toán chính của từng phân 
 
 ---
 
+## Kế Hoạch Tuần 3
+
+Mục tiêu Tuần 3: Ghép nối liên module toàn bộ hệ thống, xử lý đồng bộ hóa đa CPU, hoàn thiện luồng hoán trang bộ nhớ ảo và kiểm thử kịch bản chạy song song giữa CPU và DMA Co-processor.
+
+### 1. Hải - Phân hệ Scheduler MLQ và Đồng Bộ Hóa Đa CPU
+* File làm việc: `src/sched.c`, `src/os.c`
+* Nhiệm vụ cụ thể:
+  - Tích hợp điều phối MLQ vào môi trường đa CPU trong `src/os.c`: Bảo vệ hàng đợi `mlq_ready_queue` bằng khóa `queue_lock` khi nhiều CPU đồng thời tranh chấp tiến trình.
+  - Xử lý tiến trình kết thúc: Khi tiến trình chạy hết lệnh, cập nhật trạng thái kết thúc, loại bỏ khỏi danh sách chạy `running_list` và giải phóng CPU cho tiến trình khác.
+  - Cân bằng tải và khôi phục slot: Kiểm tra chu trình nạp lại slot cho các hàng đợi khi toàn bộ tiến trình ở các mức ưu tiên hoàn tất một chu kỳ lập lịch.
+* Cách tự kiểm tra: Chạy lệnh `make os && ./os input/os_1_mlq` và `./os input/os_2_mlq_paging` kiểm tra hệ thống đa CPU điều phối tiến trình mượt mà, không gặp deadlock.
+
+### 2. Dương - Phân hệ Memphy Swap và Hoán Trang Đa Thiết Bị
+* File làm việc: `src/mm-memphy.c`, `src/mm.c`
+* Nhiệm vụ cụ thể:
+  - Hoàn thiện luồng thay thế trang tự động trong `src/mm-memphy.c`: Khi hàm `MEMPHY_get_freefp` phát hiện RAM hết khung trang rảnh, tự động kích hoạt `find_victim_page` theo giải thuật FIFO và gọi `__swap_cp_page` để chuyển trang cũ ra thiết bị SWAP.
+  - Hỗ trợ đa thiết bị SWAP: Mở rộng khả năng chọn thiết bị SWAP còn chỗ trống trong danh sách `mswp` thay vì chỉ cố định một thiết bị duy nhất.
+  - Bảo vệ vùng nhớ vật lý: Bổ sung khóa `mem_lock` khi đọc ghi dữ liệu RAM và danh sách khung trang rảnh, tránh xung đột dữ liệu giữa các tiến trình.
+* File kiểm tra: Đối chiếu khai báo cấu trúc tại `include/os-mm.h` và `include/mm.h`.
+
+### 3. Khôi - Phân hệ VM Paging 64 bit và Xử Lý Thiếu Trang
+* File làm việc: `src/mm64.c`, `src/mm-vm.c`
+* Nhiệm vụ cụ thể:
+  - Trong `src/mm64.c`, viết hàm chuyển đổi địa chỉ `translate_address`: Tra cứu bảng phân trang 5 cấp từ địa chỉ ảo sang địa chỉ khung trang vật lý FPN kết hợp offset.
+  - Xử lý sự kiện thiếu trang: Khi bit Present trong bảng trang bằng 0 và bit Swapped bằng 1, kích hoạt luồng nạp trang từ SWAP trở lại RAM và cập nhật lại mục bảng trang tương ứng.
+  - Viết hàm thu hồi bộ nhớ `vunmap_page_range`: Xóa các mục trong bảng phân trang và trả lại khung trang vật lý khi tiến trình gọi hàm giải phóng bộ nhớ.
+* File kiểm tra: Đối chiếu công thức bóc tách địa chỉ với Bảng 2 Trang 16 trong file đặc tả môn học.
+
+### 4. Huy - Phân hệ Syscall và Cách Ly Kernel
+* File làm việc: `src/sys_mem.c`, `src/libmem.c`
+* Nhiệm vụ cụ thể:
+  - Hoàn thiện toàn bộ các mã thao tác System Call bộ nhớ trong `src/sys_mem.c`: Xử lý `SYSMEM_IO_READ`, `SYSMEM_IO_WRITE`, `SYSMEM_FREE_OP`.
+  - Trong `src/libmem.c`, hoàn thiện hàm cấp phát kernel `__kmalloc`, cùng hai hàm sao chép an toàn giữa user space và kernel space gồm `libkmem_copy_from_user` và `libkmem_copy_to_user`.
+  - Đảm bảo cách ly bảo mật theo mục 2.2 của đặc tả: Tuyệt đối không cho phép user space truyền trực tiếp con trỏ PCB vào kernel, chỉ trao đổi thông qua mã định danh tiến trình PID.
+* Cách tự kiểm tra: Chạy kịch bản kiểm tra gọi hệ thống `./os input/os_syscall` và `./os input/os_syscall_mlq`.
+
+### 5. Hưng - Phân hệ DMA Co-processor và Tích Hợp Đồng Bộ Hóa
+* File làm việc: `src/dma_c_testbench.cpp`, `src/sysbus.c`, `src/os.c`, `include/dma.h`
+* Nhiệm vụ cụ thể:
+  - Tích hợp vòng đời mô phỏng DMA vào hệ điều hành trong `src/os.c`: Khởi động mô phỏng Verilator trong luồng `co_processor` bằng `rtl_dma_init_simulation` và dọn dẹp tài nguyên khi hệ thống kết thúc bằng `rtl_dma_cleanup_simulation`.
+  - Kiểm soát đồng bộ hóa CPU và DMA: Đảm bảo khi co-processor DMA đang sao chép dữ liệu trên một vùng RAM thì CPU không được ghi đè lên vùng nhớ đó, tránh xung đột dữ liệu Race Condition.
+  - Thu thập số liệu hiệu năng: Đếm số chu kỳ xung nhịp và thời gian truyền dữ liệu của DMA so với CPU copy thông thường để chuẩn bị dữ liệu thực nghiệm cho báo cáo nhóm ở tuần 4.
+* Cách tự kiểm tra: Chạy lệnh `make os && ./os input/os_2_singleCPU_mlq_paging` và `./os input/os_2_mlq_paging` kiểm tra tiến trình `m2s` chạy đồng thời với các tiến trình CPU khác mà không bị lỗi.
+
+---
+
 ## Hướng Dẫn Biên Dịch Trên Ubuntu
 
 ```bash
