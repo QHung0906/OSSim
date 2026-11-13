@@ -30,6 +30,14 @@ typedef struct {
 static memory_bank_t_struct g_banks[MAX_MEMORY_BANKS] = {0};
 static int g_bank_count = 0;
 
+static void* g_os_ram = NULL;
+static size_t g_os_ram_size = 0;
+
+void sysbus_set_ram(void *storage, size_t size) {
+    g_os_ram = storage;
+    g_os_ram_size = size;
+}
+
 // Initialize a memory bank with given size in bytes
 memory_bank_t memory_bank_init(size_t size_bytes) {
     // Find first free slot
@@ -95,16 +103,29 @@ int memory_bank_is_available(void) {
 
 // Get pointer to locate data at offset
 void* memory_bank_get_ptr(uint64_t offset) {
-    if (offset >= g_banks[0].size) {
-        return NULL;
+    if (g_banks[0].initialized && g_banks[0].data) {
+        if (offset >= g_banks[0].size) {
+            return NULL;
+        }
+        return g_banks[0].data + offset;
     }
 
-    return g_banks[0].data + offset;
+    if (g_os_ram) {
+        if (g_os_ram_size > 0 && offset >= g_os_ram_size) {
+            return NULL;
+        }
+        return (uint8_t*)g_os_ram + offset;
+    }
+
+    return NULL;
 }
 
 // Get bank size in bytes
 size_t memory_bank_get_size() {
-    return g_banks[0].size;
+    if (g_banks[0].initialized) {
+        return g_banks[0].size;
+    }
+    return g_os_ram_size;
 }
 
 

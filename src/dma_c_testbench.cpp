@@ -62,12 +62,18 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
         src = memory_bank_get_ptr(src_offset);
         dst = memory_bank_get_ptr(dst_offset);
     } else {
-        /*
-         * TODO: map system OS memory address
-         */
-        //printf("dma_testbench modeo with OS memory address\n");
-        //src =  krnl->...
-        //dst =  krnl->...
+        struct krnl_t *krnl = caller ? caller->krnl : NULL;
+        if (krnl && krnl->mram && krnl->mram->storage) {
+            printf("dma_testbench mode with OS memory address\n");
+            sysbus_set_ram(krnl->mram->storage, krnl->mram->maxsz);
+            src = (void*)(krnl->mram->storage + src_offset);
+            dst = (void*)(krnl->mram->storage + dst_offset);
+        }
+    }
+
+    if (!src || !dst) {
+        printf("dpi_dma_copy: invalid source or destination address\n");
+        return -1;
     }
 
     printf("dpi_dma_copy: src=%llu, dst=%llu, len=%llu\n", 
@@ -78,9 +84,18 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
     uint8_t* psrc = (uint8_t*)src;
     uint64_t pattern_length = (length <= 255) ? length : 255;
     
-    for (uint64_t i = 0; i < length; i++) {
-        // Pattern cycles through 0x01 to min(length, 255)
-        psrc[i] = (uint8_t)((i % pattern_length) + 1);
+    bool is_empty = true;
+    for (uint64_t i = 0; i < length && i < 8; i++) {
+        if (psrc[i] != 0) {
+            is_empty = false;
+            break;
+        }
+    }
+    if (is_empty) {
+        for (uint64_t i = 0; i < length; i++) {
+            // Pattern cycles through 0x01 to min(length, 255)
+            psrc[i] = (uint8_t)((i % pattern_length) + 1);
+        }
     }
 
     printf("Before copy:\n");
@@ -137,7 +152,9 @@ extern "C" pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
  * length: number of bytes to copy
  */
 extern "C" int do_dma(struct pcb_t *caller, uint64_t source, uint64_t destination, uint64_t length) {
+    pthread_mutex_lock(&dma_lock);
     if (dma_busy) {
+        pthread_mutex_unlock(&dma_lock);
         return -1;
     }
 
@@ -146,6 +163,7 @@ extern "C" int do_dma(struct pcb_t *caller, uint64_t source, uint64_t destinatio
     std::thread dma_thread([caller, source, destination, length]() {
         dpi_dma_copy(caller, source, destination, length);
         dma_busy = false;
+        pthread_mutex_unlock(&dma_lock);
     });
     dma_thread.detach();
 

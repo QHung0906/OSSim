@@ -43,6 +43,9 @@ size_t memory_bank_get_size(void);
 // Check if memory bank is initialized
 int memory_bank_is_available(void);
 
+// Set real OS RAM storage for bus addressing
+void sysbus_set_ram(void *storage, size_t size);
+
 // DPI Callback: Called from RTL when DMA read access
 int dpi_bank_read32_legacy(long long offset);
 
