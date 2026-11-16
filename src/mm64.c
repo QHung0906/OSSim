@@ -421,14 +421,14 @@ addr_t alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_st
   //caller-> ...
   //frm_lst-> ...
   */
-  if (caller == NULL || caller->mram == NULL || frm_lst == NULL)
+  if (caller == NULL || caller->krnl == NULL || caller->krnl->mram == NULL || frm_lst == NULL)
     return -1;
 
   *frm_lst = NULL;
 
   for (pgit = 0; pgit < req_pgnum; pgit++)
   {
-    if (MEMPHY_get_freefp(caller->mram, &fpn) != 0)
+    if (MEMPHY_get_freefp(caller->krnl->mram, &fpn) != 0)
       return -3000;
 
     newfp_str = malloc(sizeof(struct framephy_struct));
