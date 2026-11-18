@@ -19,7 +19,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
+pthread_mutex_t mem_lock = PTHREAD_MUTEX_INITIALIZER;
+extern struct memphy_struct mswp[PAGING_MAX_MMSWP];
 /*
  *  MEMPHY_mv_csr - move MEMPHY cursor
  *  @mp: memphy struct
@@ -68,15 +71,22 @@ int MEMPHY_seq_read(struct memphy_struct *mp, addr_t addr, BYTE *value)
  */
 int MEMPHY_read(struct memphy_struct *mp, addr_t addr, BYTE *value)
 {
-   if (mp == NULL)
+   if (mp == NULL || mp->storage == NULL)
       return -1;
 
-   if (mp->rdmflg)
-      *value = mp->storage[addr];
-   else /* Sequential access device */
-      return MEMPHY_seq_read(mp, addr, value);
+   pthread_mutex_lock(&mem_lock); 
 
-   return 0;
+   if (mp->rdmflg)
+   {
+      *value = mp->storage[addr];
+      pthread_mutex_unlock(&mem_lock); 
+      return 0;
+   }
+   else
+   {
+      pthread_mutex_unlock(&mem_lock); 
+      return MEMPHY_seq_read(mp, addr, value);
+   }
 }
 
 /*
@@ -108,15 +118,22 @@ int MEMPHY_seq_write(struct memphy_struct *mp, addr_t addr, BYTE value)
  */
 int MEMPHY_write(struct memphy_struct *mp, addr_t addr, BYTE data)
 {
-   if (mp == NULL)
+   if (mp == NULL || mp->storage == NULL)
       return -1;
 
-   if (mp->rdmflg)
-      mp->storage[addr] = data;
-   else /* Sequential access device */
-      return MEMPHY_seq_write(mp, addr, data);
+   pthread_mutex_lock(&mem_lock); 
 
-   return 0;
+   if (mp->rdmflg)
+   {
+      mp->storage[addr] = data;
+      pthread_mutex_unlock(&mem_lock); 
+      return 0;
+   }
+   else
+   {
+      pthread_mutex_unlock(&mem_lock);
+      return MEMPHY_seq_write(mp, addr, data);
+   }
 }
 
 /*
@@ -137,6 +154,7 @@ int MEMPHY_format(struct memphy_struct *mp, int pagesz)
    fst = malloc(sizeof(struct framephy_struct));
    fst->fpn = iter;
    mp->free_fp_list = fst;
+   mp->used_fp_list = NULL;
 
    /* We have list with first element, fill in the rest num-1 element member*/
    for (iter = 1; iter < numfp; iter++)
@@ -150,61 +168,154 @@ int MEMPHY_format(struct memphy_struct *mp, int pagesz)
 
    return 0;
 }
+static void used_fp_list(struct memphy_struct *mp, struct framephy_struct *node)
+{
+   node->fp_next = NULL;
+   if (mp->used_fp_list == NULL)
+   {
+      mp->used_fp_list = node;
+   }
+   else
+   {
+      struct framephy_struct *curr = mp->used_fp_list;
+      while (curr->fp_next != NULL)
+      {
+         curr = curr->fp_next;
+      }
+      curr->fp_next = node;
+   }
+}
 
+/* Hàm lấy khung trang rảnh / thay thế trang gốc */
 int MEMPHY_get_freefp(struct memphy_struct *mp, addr_t *retfpn)
 {
-   if (mp == NULL || mp->free_fp_list == NULL || retfpn == NULL)
+   if (mp == NULL || retfpn == NULL)
       return -1;
-   struct framephy_struct *fp = mp->free_fp_list;
 
-   if (fp == NULL)
+   pthread_mutex_lock(&mem_lock);
+
+   struct framephy_struct *fp = mp->free_fp_list;
+   if (fp != NULL)
+   {
+      *retfpn = fp->fpn;
+      mp->free_fp_list = fp->fp_next;
+      used_fp_list(mp, fp);
+      pthread_mutex_unlock(&mem_lock);
+      return 0;
+   }
+
+   struct framephy_struct *victim = mp->used_fp_list;
+   if (victim == NULL)
+   {
+      pthread_mutex_unlock(&mem_lock);
       return -1;
-*retfpn = fp->fpn;
-mp->free_fp_list = fp->fp_next;
+   }
+
+   addr_t victim_fpn = victim->fpn;
+   int swp_dev = -1;
+   addr_t swp_fpn = 0;
+
+   for (int i = 0; i < PAGING_MAX_MMSWP; i++)
+   {
+      if (mswp[i].storage != NULL && mswp[i].free_fp_list != NULL)
+      {
+         struct framephy_struct *swp_fp = mswp[i].free_fp_list;
+         swp_fpn = swp_fp->fpn;
+         mswp[i].free_fp_list = swp_fp->fp_next;
+         free(swp_fp);
+         swp_dev = i;
+         break;
+      }
+   }
+
+   if (swp_dev == -1)
+   {
+      pthread_mutex_unlock(&mem_lock);
+      return -1; 
+   }
+
+   if (__swap_cp_page(mp, victim_fpn, &mswp[swp_dev], swp_fpn) != 0)
+   {
+      pthread_mutex_unlock(&mem_lock);
+      return -1;
+   }
+
+   mp->used_fp_list = victim->fp_next;
+   used_fp_list(mp, victim);
+
+   *retfpn = victim_fpn;
+
+   pthread_mutex_unlock(&mem_lock);
+   return 0;
+}
    /* 
     * TODO manage free frame list
     */
    //*retfpn ..
-   // cap nhat lai danh sach free frame
 
    /* 
     * TODO MEMPHY is iteratively used up until its exhausted
     * No garbage collector acting then it not been released
     */
-   free(fp);
-
-   return 0;
-}
+   
 
 int MEMPHY_dump(struct memphy_struct *mp)
 {
    if (mp == NULL || mp->storage == NULL)
       return -1;
-      for (int i = 0; i < mp->maxsz; i++)
+
+   pthread_mutex_lock(&mem_lock);
+
+   for (int i = 0; i < mp->maxsz; i++)
    {
       if (i % 16 == 0)
          printf("\n0x%08x: ", i);
 
       printf("%02x ", (unsigned char)mp->storage[i]);
    }
+   printf("\n");
+
+   pthread_mutex_unlock(&mem_lock);
+   return 0;
+}
   /*
    * TODO dump memphy contnt mp->storage
    *     for tracing the memory content
    */
-printf("\n");
-   return 0;
-}
+
 
 int MEMPHY_put_freefp(struct memphy_struct *mp, addr_t fpn)
 {
-   struct framephy_struct *fp = mp->free_fp_list;
-   struct framephy_struct *newnode = malloc(sizeof(struct framephy_struct));
+   if (mp == NULL)
+      return -1;
 
-   /* Create new node with value fpn */
+   pthread_mutex_lock(&mem_lock);
+
+   struct framephy_struct *curr = mp->used_fp_list;
+   struct framephy_struct *prev = NULL;
+
+   while (curr != NULL)
+   {
+      if (curr->fpn == fpn)
+      {
+         if (prev == NULL)
+            mp->used_fp_list = curr->fp_next;
+         else
+            prev->fp_next = curr->fp_next;
+
+         free(curr);
+         break;
+      }
+      prev = curr;
+      curr = curr->fp_next;
+   }
+
+   struct framephy_struct *newnode = malloc(sizeof(struct framephy_struct));
    newnode->fpn = fpn;
-   newnode->fp_next = fp;
+   newnode->fp_next = mp->free_fp_list;
    mp->free_fp_list = newnode;
 
+   pthread_mutex_unlock(&mem_lock);
    return 0;
 }
 
@@ -271,15 +382,7 @@ int __swap_cp_page(struct memphy_struct *mpsrc, addr_t srcfpn,
    if (dst_off + pgsz > (addr_t)mpdst->maxsz)
       return -1;
 
-   addr_t i;
-   BYTE value;
-   for (i = 0; i < pgsz; i++)
-   {
-      if (MEMPHY_read(mpsrc, src_off + i, &value) != 0)
-         return -1;
-      if (MEMPHY_write(mpdst, dst_off + i, value) != 0)
-         return -1;
-   }
+   memcpy(&mpdst->storage[dst_off], &mpsrc->storage[src_off], pgsz);
 
    return 0;
 }
