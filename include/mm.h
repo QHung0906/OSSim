@@ -130,6 +130,9 @@ int pte_set_fpn(struct mm_struct *mm, addr_t pgn, addr_t fpn,struct pcb_t *calle
 int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff);
 addr_t pte_get_entry(struct mm_struct *mm, addr_t pgn, struct pcb_t *caller);
 int pte_set_entry(struct mm_struct *mm, addr_t pgn, uint64_t pte_val, struct pcb_t *caller);
+addr_t translate_address(struct pcb_t *caller, addr_t vaddr);
+int handle_page_fault(struct pcb_t *caller, addr_t pgn);
+int vunmap_page_range(struct pcb_t *caller, addr_t start, addr_t end);
 int init_pte(addr_t *pte,
              int pre,    // present
              addr_t fpn,    // FPN

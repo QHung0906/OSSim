@@ -32,15 +32,13 @@ struct vm_area_struct *get_vma_by_num(struct mm_struct *mm, int vmaid)
   if (mm->mmap == NULL)
     return NULL;
 
-  int vmait = pvma->vm_id;
 
-  while (vmait < vmaid)
+ while (pvma != NULL && pvma->vm_id < vmaid)
+
   {
-    if (pvma == NULL)
-      return NULL;
 
     pvma = pvma->vm_next;
-    vmait = pvma->vm_id;
+
   }
 
   return pvma;
@@ -168,9 +166,19 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
   }
 
   /* TODO: Obtain the new vm area based on vmaid */
+  addr_t old_sbrk = cur_vma->sbrk;
   cur_vma->sbrk = newrg->rg_end;
   cur_vma->vm_end = newrg->rg_end;
   free(newrg);
+
+#ifdef MM64
+  int incpgnum = (int)(alignedsz / PAGING64_PAGESZ);
+#else
+  int incpgnum = (int)(alignedsz / PAGING_PAGESZ);
+#endif
+  struct vm_rg_struct ret_rg;
+  if (vm_map_ram(caller, old_sbrk, cur_vma->sbrk, old_sbrk, incpgnum, &ret_rg) < 0)
+    return -1;
 
   return 0;
 }
