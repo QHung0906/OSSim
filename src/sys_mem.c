@@ -47,12 +47,10 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
     /* user process are not allowed to access directly pcb in kernel space of syscall */
     //....
 
-   if (krnl != NULL && krnl->running_list != NULL) {
-       for (int i = 0; i < krnl->running_list->size; i++) {
-           if (krnl->running_list->proc[i] != NULL && krnl->running_list->proc[i]->pid == pid) {
-               caller = krnl->running_list->proc[i];
-               break;
-           }
+   for (int i = 0; i < krnl->running_list->size; i++) {
+       if (krnl->running_list->proc[i] != NULL && krnl->running_list->proc[i]->pid == pid) {
+           caller = krnl->running_list->proc[i];
+           break;
        }
    }
 
@@ -77,6 +75,9 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
             break;
    case SYSMEM_IO_WRITE:
             MEMPHY_write(krnl->mram, regs->a2, regs->a3);
+            break;
+   case SYSMEM_FREE_OP:
+            
             break;
    default:
             printf("Memop code: %d\n", memop);

@@ -79,7 +79,8 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
   {
     caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
     caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
- 
+    caller->mm->symrgtbl[rgid].mode_bit = 1;
+
     *alloc_addr = rgnode.rg_start;
 
     pthread_mutex_unlock(&mmvm_lock);
@@ -115,6 +116,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
   /*Successful increase limit */
   caller->mm->symrgtbl[rgid].rg_start = old_sbrk;
   caller->mm->symrgtbl[rgid].rg_end = old_sbrk + size;
+  caller->mm->symrgtbl[rgid].mode_bit = 1;
 
   *alloc_addr = old_sbrk;
 
@@ -529,10 +531,53 @@ addr_t __kmalloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t 
 {
   /* TODO: provide OS kernel memory allocation
    *       update krnl_pgd for OS kernel level management */
+  pthread_mutex_lock(&kmm_lock);
+  pthread_mutex_lock(&mmvm_lock);
 
-  //struct krnl_t *krnl = caller->krnl;
-  //krnl->symrgtbl...
-  //krnl->krnl_pgd ...
+  struct krnl_t *krnl = caller->krnl;
+  struct vm_rg_struct rgnode;
+  struct vm_area_struct* cur_vma = get_vma_by_num(caller->mm, vmaid);
+
+  if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
+  {
+    caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
+    caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
+    caller->mm->symrgtbl[rgid].mode_bit = 0;
+ 
+    *alloc_addr = rgnode.rg_start;
+
+    if (krnl != NULL && krnl->krnl_pgd == NULL)
+      krnl->krnl_pgd = caller->mm->pgd;
+
+    pthread_mutex_unlock(&mmvm_lock);
+    pthread_mutex_unlock(&kmm_lock);
+    return 0;
+  }
+
+  int old_sbrk;
+  old_sbrk = cur_vma->sbrk;
+
+  struct sc_regs regs;
+  regs.a1 = SYSMEM_INC_OP;
+  regs.a2 = vmaid;
+#ifdef MM64
+  regs.a3 = size;
+#else
+  regs.a3 = PAGING_PAGE_ALIGNSZ(size);
+#endif  
+  _syscall(krnl, caller->pid, 17, &regs);
+
+  caller->mm->symrgtbl[rgid].rg_start = old_sbrk;
+  caller->mm->symrgtbl[rgid].rg_end = old_sbrk + size;
+  caller->mm->symrgtbl[rgid].mode_bit = 0;
+
+  *alloc_addr = old_sbrk;
+
+  if (krnl != NULL && krnl->krnl_pgd == NULL)
+    krnl->krnl_pgd = caller->mm->pgd;
+
+  pthread_mutex_unlock(&mmvm_lock);
+  pthread_mutex_unlock(&kmm_lock);
 
   return 0;
 
