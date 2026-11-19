@@ -28,6 +28,9 @@ void put_proc(struct pcb_t * proc);
 /* Add a new process to ready queue */
 void add_proc(struct pcb_t * proc);
 
+/* Finish a process and remove from running list */
+void finish_proc(struct pcb_t * proc);
+
 #ifdef __cplusplus
 }
 #endif
