@@ -21,12 +21,14 @@
 
 #include "sysbus.h"
 #include "dpi_rtl.h"
+#include "dma.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <cstdbool>
 #include <thread>
+#include <mutex>
 #include <atomic>
 
 // Generated DPI functions from RTL
@@ -142,8 +144,15 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
     return result;
 }
 
-static std::atomic<bool> dma_busy(false);
-extern "C" pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
+static std::mutex s_hw_dma_mutex;
+static std::atomic<int> s_active_dma(0);
+
+extern "C" void rtl_dma_wait_idle(void) {
+    while (s_active_dma.load() > 0) {
+        std::this_thread::yield();
+    }
+}
 
 /*
  * do_dma - perform DMA function
@@ -152,18 +161,14 @@ extern "C" pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
  * length: number of bytes to copy
  */
 extern "C" int do_dma(struct pcb_t *caller, uint64_t source, uint64_t destination, uint64_t length) {
-    pthread_mutex_lock(&dma_lock);
-    if (dma_busy) {
-        pthread_mutex_unlock(&dma_lock);
-        return -1;
-    }
-
-    dma_busy = true;
+    s_active_dma++;
 
     std::thread dma_thread([caller, source, destination, length]() {
-        dpi_dma_copy(caller, source, destination, length);
-        dma_busy = false;
-        pthread_mutex_unlock(&dma_lock);
+        {
+            std::lock_guard<std::mutex> lock(s_hw_dma_mutex);
+            dpi_dma_copy(caller, source, destination, length);
+        }
+        s_active_dma--;
     });
     dma_thread.detach();
 
@@ -224,9 +229,8 @@ int main(int argc, char** argv) {
 
     int result = do_dma(caller, source, destination, length);
 
-    while (dma_busy) {
-        std::this_thread::yield();
-    }
+    rtl_dma_wait_idle();
+    rtl_dma_cleanup_simulation();
 
     // Cleanup
     free(caller->krnl->active_mswp);

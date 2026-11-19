@@ -167,6 +167,7 @@ int dpi_bank_write32_legacy(long long offset, int value) {
 /**
  * DPI Callback: Called from RTL when DMA transfer completes
  */
+ // khi ch_done = 1 nó tự gọi hàm
 void dma_done_callback(void)
 {
     printf("DMA completed\n");

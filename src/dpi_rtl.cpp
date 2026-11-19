@@ -53,6 +53,7 @@ extern "C" int rtl_dma_init_simulation(void) {
  * rtl_dma_cleanup_simulation - Cleanup the RTL simulation for DMA
  */
 extern "C" void rtl_dma_cleanup_simulation(void) {
+    rtl_dma_wait_idle();
     if (tracer) {
         tracer->close();
         delete tracer;
@@ -143,7 +144,14 @@ extern "C" int dpi_rtl_dma_copy(uint64_t source, uint64_t destination, uint64_t 
     top->ch_enable = 0;
     top->ch_pause = 0;
     
-    //printf("RTL DMA Copy: Completed in %d cycles, ch_done=%d\n", cycle, (int)top->ch_done);
+    if (top->ch_done) {
+        double bytes_per_cycle = (cycle > 0) ? ((double)length / (double)cycle) : 0.0;
+        printf("[RTL DMA Engine] Completed: %llu bytes in %d clock cycles (%.2f bytes/cycle)\n",
+               (unsigned long long)length, cycle, bytes_per_cycle);
+    } else {
+        printf("[RTL DMA Engine] Timeout after %d clock cycles, length=%llu bytes\n",
+               cycle, (unsigned long long)length);
+    }
 
     return top->ch_done ? 0 : -1;
 }
