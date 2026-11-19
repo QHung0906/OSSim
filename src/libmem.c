@@ -153,6 +153,31 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   freerg_node->rg_end = rgnode->rg_end;
   freerg_node->rg_next = NULL;
 
+#ifdef MM64
+  addr_t first_pgn = rgnode->rg_start >> PAGING64_ADDR_PT_SHIFT;
+  addr_t last_pgn = (rgnode->rg_end > 0) ? ((rgnode->rg_end - 1) >> PAGING64_ADDR_PT_SHIFT) : 0;
+  for (addr_t pgn = first_pgn; pgn <= last_pgn; pgn++)
+  {
+    addr_t page_start = pgn << PAGING64_ADDR_PT_SHIFT;
+    addr_t page_end = page_start + PAGING64_PAGESZ;
+    int shared = 0;
+    for (int other = 0; other < PAGING_MAX_SYMTBL_SZ; other++)
+    {
+      struct vm_rg_struct *other_rg = &caller->mm->symrgtbl[other];
+      if (other != rgid && other_rg->rg_start < other_rg->rg_end &&
+          OVERLAP(page_start, page_end, other_rg->rg_start, other_rg->rg_end))
+      {
+        shared = 1;
+        break;
+      }
+    }
+    if (!shared)
+    {
+      vunmap_page_range(caller, page_start, page_end);
+    }
+  }
+#endif
+
   rgnode->rg_start = rgnode->rg_end = 0;
   rgnode->rg_next = NULL;
 
@@ -224,6 +249,13 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 
   if (!PAGING_PAGE_PRESENT(pte))
   { /* Page is not online, make it actively living */
+#ifdef MM64
+    if (!(pte & PAGING_PTE_SWAPPED_MASK))
+      return -1;
+    if (handle_page_fault(caller, (addr_t)pgn) != 0)
+      return -1;
+    pte = pte_get_entry(caller->mm, pgn, caller);
+#else
     addr_t vicpgn;
     addr_t vicpte;
     addr_t vicfpn, swpfpn;
@@ -264,13 +296,14 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 
     /* Update page table */
     //pte_set_swap(...);
-    pte_set_swap(caller->mm, vicpgn, 0, swpfpn);
+    pte_set_swap(caller, vicpgn, 0, swpfpn);
 
     /* Update its online status of the target page */
     //pte_set_fpn(...);
-    pte_set_fpn(caller->mm, pgn, vicfpn);
+    pte_set_fpn(caller->mm, pgn, vicfpn, caller);
 
     enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
+#endif
   }
 
   *fpn = PAGING_FPN(pte_get_entry(caller->mm,pgn, caller));
@@ -287,21 +320,17 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
 #ifdef MM64
-  int pgn = addr >> PAGING64_ADDR_PT_SHIFT;
-  int off = addr & PAGING64_ADDR_OFFST_MASK;
+  addr_t phyaddr = translate_address(caller, (addr_t)addr);
+  if (phyaddr == (addr_t)-1)
+    return -1;
 #else
   int pgn = PAGING_PGN(addr);
   int off = PAGING_OFFST(addr);
-#endif
   int fpn;
-
 
   if (pg_getpage(mm, pgn, &fpn, caller) != 0)
     return -1; /* invalid page access */
 
-#ifdef MM64
-  int phyaddr = (fpn << PAGING64_ADDR_PT_SHIFT) + off;
-#else
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
 #endif
 
@@ -330,21 +359,18 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
 #ifdef MM64
-  int pgn = addr >> PAGING64_ADDR_PT_SHIFT;
-  int off = addr & PAGING64_ADDR_OFFST_MASK;
+  addr_t phyaddr = translate_address(caller, (addr_t)addr);
+  if (phyaddr == (addr_t)-1)
+    return -1;
 #else
   int pgn = PAGING_PGN(addr);
   int off = PAGING_OFFST(addr);
-#endif
   int fpn;
 
   /* Get the page to MEMRAM, swap from MEMSWAP if needed */
   if (pg_getpage(mm, pgn, &fpn, caller) != 0)
     return -1; /* invalid page access */
 
-#ifdef MM64
-  int phyaddr = (fpn << PAGING64_ADDR_PT_SHIFT) + off;
-#else
   int phyaddr = (fpn << PAGING_ADDR_FPN_LOBIT) + off;
 #endif
 
