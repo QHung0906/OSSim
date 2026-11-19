@@ -155,6 +155,47 @@ Mục tiêu Tuần 3: Ghép nối liên module toàn bộ hệ thống, xử lý
 
 ---
 
+## Kế Hoạch Tuần 4
+
+Mục tiêu Tuần 4: Tích hợp toàn diện toàn bộ các phân hệ, chạy kiểm thử tải và dồn nén dữ liệu đa CPU, đo lường thống kê hiệu năng, phân tích sóng xung kích phần cứng và hoàn thiện báo cáo môn học.
+
+### 1. Hải - Phân hệ Scheduler MLQ: Tối Ưu & Phân Tích Gantt Chart
+* File làm việc: `src/sched.c`, viết báo cáo
+* Nhiệm vụ cụ thể:
+  - Vẽ và phân tích biểu đồ Gantt minh họa thứ tự thực thi của các tiến trình trên môi trường đa CPU theo chính sách MLQ 140 mức ưu tiên.
+  - Tính toán và đánh giá các chỉ số điều phối: Thời gian chờ trung bình (Average Waiting Time), Thời gian hoàn thành (Turnaround Time), và Độ tận dụng CPU (CPU Utilization).
+  - Kiểm thử kịch bản tiến trình có mức ưu tiên thay đổi động (`prio` trên file cấu hình) và kiểm tra khả năng Starvation prevention.
+
+### 2. Dương - Phân hệ Memphy Swap: Đánh Giá Hiệu Năng Bộ Nhớ Vật Lý
+* File làm việc: `src/mm-memphy.c`, viết báo cáo
+* Nhiệm vụ cụ thể:
+  - Thu thập thống kê số lượng truy cập bộ nhớ vật lý: Tổng số lần đọc (`MEMPHY_read`), số lần ghi (`MEMPHY_write`), và số lần hoán trang ra thiết bị SWAP.
+  - Đo lường và đánh giá tỷ lệ thiếu trang (Page Fault Rate) khi chạy các kịch bản bộ nhớ hạn chế với nhiều tiến trình chạy đồng thời.
+  - Kiểm tra và dọn dẹp triệt để rò rỉ bộ nhớ trong các danh sách khung trang `free_fp_list` và `used_fp_list` khi tắt hệ điều hành.
+
+### 3. Khôi - Phân hệ VM Paging 64 bit: Thống Kê Bảng Phân Trang Đa Cấp
+* File làm việc: `src/mm64.c`, viết báo cáo
+* Nhiệm vụ cụ thể:
+  - Thống kê chi phí bộ nhớ của bảng phân trang 5 cấp: Tính toán dung lượng RAM tiêu tốn cho các bảng PGD, P4D, PUD, PMD, PT theo từng tiến trình và giải thích tính ưu việt của phân trang đa cấp so với bảng trang 1 cấp.
+  - Vẽ sơ đồ chuyển đổi địa chỉ ảo 64-bit sang địa chỉ vật lý dựa trên kết quả dump thực tế từ hàm `print_pgtbl`.
+  - Phân tích hiệu quả của giải thuật thay thế trang FIFO và kiểm chứng cơ chế chống giải phóng nhầm các trang dùng chung (`OVERLAP`).
+
+### 4. Huy - Phân hệ Syscall: Đánh Giá Tính Cách Ly Không Gian Kernel
+* File làm việc: `src/sys_mem.c`, `src/libmem.c`, viết báo cáo
+* Nhiệm vụ cụ thể:
+  - Hoàn thiện và tài liệu hóa bảng mã System Call: Bảng đối chiếu các mã thao tác bộ nhớ `SYSMEM_*` và thanh ghi đối số `sc_regs`.
+  - Kiểm tra toàn diện tính bảo mật phân quyền User/Kernel Space: Đảm bảo tiến trình người dùng không thể can thiệp trực tiếp vào con trỏ PCB của Kernel, mọi thao tác đều phải đi qua mã định danh PID và cấu trúc `struct krnl_t`.
+  - Viết tài liệu hướng dẫn và giải thích cơ chế gọi hệ thống `_syscall`.
+
+### 5. Hưng - Phân hệ DMA Co-processor, Đo Lường Hiệu Năng & Tổng Hợp Báo Cáo
+* File làm việc: `src/dma_c_testbench.cpp`, `src/dpi_rtl.cpp`, `src/os.c`, file sóng `rtl_trace.vcd`, viết báo cáo
+* Nhiệm vụ cụ thể:
+  - Phân tích dạng sóng xung kích phần cứng (Hardware Waveforms): Mở file `rtl_trace.vcd` bằng GTKWave, chụp và phân tích các tín hiệu xung nhịp `CLK`, reset `RST_N`, kích hoạt kênh `ch_en`, tín hiệu hoàn thành `ch_done`, và trạng thái sẵn sàng `dat_ready`.
+  - Đánh giá và so sánh hiệu năng truyền dữ liệu: Lập bảng so sánh băng thông truyền dữ liệu giữa Co-processor DMA phần cứng so với lệnh CPU copy thông thường (`memcpy` tuần tự), vẽ đồ thị trực quan.
+  - Tổng hợp báo cáo môn học: Điều phối và ráp nối nội dung các phần Scheduling, MMU/Paging, Syscall, DMA thành báo cáo nhóm hoàn chỉnh.
+
+---
+
 ## Hướng Dẫn Biên Dịch Trên Ubuntu
 
 ```bash
