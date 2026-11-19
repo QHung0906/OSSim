@@ -326,6 +326,17 @@ int main(int argc, char * argv[]) {
 	/* Stop timer */
 	stop_timer();
 
+	/* Join co-processor and clean up DMA RTL simulation */
+	pthread_join(*dma, NULL);
+	free(dma);
+	free(cpu);
+	free(args);
+#ifdef MM_PAGING
+	free(mm_ld_args);
+#endif
+
+	rtl_dma_cleanup_simulation();
+
 	return 0;
 
 }
