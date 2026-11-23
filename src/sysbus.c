@@ -140,6 +140,9 @@ int dpi_bank_read32_legacy(long long offset) {
     uint8_t data[4] = {0};
 
     void* src = memory_bank_get_ptr((size_t)offset);
+    if (!src) {
+        return 0;
+    }
 
     //printf("MEM READ RESULT: Address=%p, DPI return=%x, Readback=%x, Match=%d\n",
     //        (void*)((size_t)offset), *(unsigned int*)data, *(unsigned int*)data, 1);
@@ -155,6 +158,9 @@ int dpi_bank_read32_legacy(long long offset) {
  */
 int dpi_bank_write32_legacy(long long offset, int value) {
     void* dst = memory_bank_get_ptr((size_t)offset);
+    if (!dst) {
+        return -1;
+    }
     //printf("MEM WRITE RESULT: Address=%p, Write data=%x, Write rc=0, Readback=%x, Match=1\n",
     //        (void*)((size_t)offset), *(unsigned int*)&value, *(unsigned int*)&value);
     memcpy(dst,  &value, 4);
