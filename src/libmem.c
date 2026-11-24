@@ -509,14 +509,24 @@ int libkmem_malloc(struct pcb_t * caller, uint32_t size, uint32_t reg_index)
    * TODO: provide OS level management
    *       and forward the request to helper
    */
-//addr_t  addr;
-//int val = ...
+  addr_t  addr;
+  int val = __kmalloc(caller, 0, reg_index, size, &addr);
+  if (val == -1) return -1;
+
+  caller->regs[reg_index] = addr;
+
+#ifdef IODUMP
+#ifdef PAGETBL_DUMP
+  print_pgtbl(caller, 0, -1);
+#endif
+#endif
+
 
   /* 
    * TODO: provide OS kmem allocation validation
    */
 
-  return 0;
+  return val;
 }
 
 
@@ -621,7 +631,27 @@ int libkmem_copy_from_user(struct pcb_t *caller, uint32_t source, uint32_t desti
    */
   //__read_user_mem(...)
   //__write_kernel_mem(...);
+  
+  if (caller == NULL)   return -1;
 
+  pthread_mutex_lock(&kmm_lock);
+  for (uint32_t i = 0; i < size; i++)
+  {
+      BYTE data = 0;
+      if (__read_user_mem(caller, 0, source, offset + i, &data) != 0)
+      {
+          pthread_mutex_unlock(&kmm_lock);
+          return -1;
+      }
+
+      if (__write_kernel_mem(caller, 0, destination, offset + i, &data) != 0)
+      {
+          pthread_mutex_unlock(&kmm_lock);
+          return -1;
+      }
+  }
+        
+  pthread_mutex_unlock(&kmm_lock);
   return 0;
 }
 
@@ -634,8 +664,27 @@ int libkmem_copy_to_user(struct pcb_t *caller, uint32_t source, uint32_t destina
    */
   //__read_kernel_mem(...)
   //__write_user_mem(...);
+  if (caller == NULL)   return -1;
 
-  return 1;
+  pthread_mutex_lock(&kmm_lock);
+  for (uint32_t i = 0; i < size; i++)
+  {
+      BYTE data = 0;
+      if (__read_kernel_mem(caller, 0, source, offset + i, &data) != 0)
+      {
+          pthread_mutex_unlock(&kmm_lock);
+          return -1;
+      }
+
+      if (__write_user_mem(caller, 0, destination, offset + i, &data) != 0)
+      {
+          pthread_mutex_unlock(&kmm_lock);
+          return -1;
+      }
+  }
+
+  pthread_mutex_unlock(&kmm_lock);
+  return 0;
 }
 
 
@@ -650,7 +699,24 @@ int __read_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, 
 {
   /* TODO: provide OS memory operator for kernel memory region */
   //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
+  pthread_mutex_lock(&mmvm_lock);
+  struct vm_rg_struct* currg = get_symrg_byid(caller->mm, rgid);
+  struct vm_area_struct* cur_vma = get_vma_by_num(caller->mm, vmaid);
 
+  if (currg == NULL || cur_vma == NULL || currg->rg_start >= currg->rg_end ||
+      currg->mode_bit != 0 || (currg->rg_start + offset >= currg->rg_end))
+  {
+      pthread_mutex_unlock(&mmvm_lock);
+      return -1;
+  }
+
+  if (pg_getval(caller->mm, currg->rg_start + offset, data, caller) != 0)
+  {
+      pthread_mutex_unlock(&mmvm_lock);
+      return -1;
+  }
+
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -665,7 +731,24 @@ int __write_kernel_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset,
 {
   /* TODO: provide OS memory operator for kernel memory region */
   //krnl->krnl_pgd ... or krnl->pgd ... based on kmem implementation strategy
+  pthread_mutex_lock(&mmvm_lock);
+  struct vm_rg_struct *currg = get_symrg_byid(caller->mm, rgid);
+  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
+  if (currg == NULL || cur_vma == NULL || currg->rg_start >= currg->rg_end ||
+      currg->mode_bit != 0 || (currg->rg_start + offset >= currg->rg_end))
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  if (pg_setval(caller->mm, currg->rg_start + offset, value, caller) != 0)
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -680,8 +763,25 @@ int __read_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, BY
 {
   /* TODO: provide OS level management user memory access */
   //krnl->pgd ... or krnl->krnl_pgd  ... based on kmem implementation strategy
+  pthread_mutex_lock(&mmvm_lock);
+  struct vm_rg_struct *currg = get_symrg_byid(caller->mm, rgid);
+  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
-   return 0;
+  if (currg == NULL || cur_vma == NULL || currg->rg_start >= currg->rg_end ||
+      currg->mode_bit != 1 || (currg->rg_start + offset >= currg->rg_end))
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  if (pg_getval(caller->mm, currg->rg_start + offset, data, caller) != 0)
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  pthread_mutex_unlock(&mmvm_lock);
+  return 0;
 }
 
 
@@ -696,7 +796,24 @@ int __write_user_mem(struct pcb_t *caller, int vmaid, int rgid, addr_t offset, B
 {
   /* TODO: provide OS level management user memory access */
   //krnl->pgd ... or krnl->krnl_pgd  ... based on kmem implementation strategy
+  pthread_mutex_lock(&mmvm_lock);
+  struct vm_rg_struct *currg = get_symrg_byid(caller->mm, rgid);
+  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
+  if (currg == NULL || cur_vma == NULL || currg->rg_start >= currg->rg_end ||
+      currg->mode_bit != 1 || (currg->rg_start + offset >= currg->rg_end))
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  if (pg_setval(caller->mm, currg->rg_start + offset, value, caller) != 0)
+  {
+    pthread_mutex_unlock(&mmvm_lock);
+    return -1;
+  }
+
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
