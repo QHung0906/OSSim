@@ -111,14 +111,10 @@ int get_pd_from_pagenum(addr_t pgn, addr_t* pgd, addr_t* p4d, addr_t* pud, addr_
  */
 int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 {
-  if (caller == NULL)
+  if (caller == NULL || caller->mm == NULL)
     return -1;
 
-  struct mm_struct *mm = NULL;
-  if (caller->pid > 0 && caller->pid < 100000 && caller->mm != NULL)
-    mm = caller->mm;
-  else
-    mm = (struct mm_struct *)caller;
+  struct mm_struct *mm = caller->mm;
 
   addr_t *pte = NULL;
   addr_t pgd=0;
@@ -318,8 +314,6 @@ int pte_set_entry(struct mm_struct *mm, addr_t pgn, uint64_t pte_val, struct pcb
   return 0;
 }
 
-extern struct memphy_struct mswp[PAGING_MAX_MMSWP];
-
 /*
  * handle_page_fault - Xử lý sự kiện thiếu trang:
  * Khi bit Present == 0 và bit Swapped == 1, nạp trang từ SWAP trở lại RAM và cập nhật lại mục bảng trang tương ứng
@@ -329,7 +323,8 @@ extern struct memphy_struct mswp[PAGING_MAX_MMSWP];
  */
 int handle_page_fault(struct pcb_t *caller, addr_t pgn)
 {
-  if (caller == NULL || caller->mm == NULL || caller->krnl == NULL || caller->krnl->mram == NULL)
+  if (caller == NULL || caller->mm == NULL || caller->krnl == NULL ||
+      caller->krnl->mram == NULL || caller->krnl->mswp == NULL)
     return -1;
 
   addr_t pte = pte_get_entry(caller->mm, pgn, caller);
@@ -341,70 +336,25 @@ int handle_page_fault(struct pcb_t *caller, addr_t pgn)
   int swptyp = PAGING_PTE_SWPTYP(pte);
   addr_t swpoff = PAGING_PTE_SWP(pte);
 
-  if (swptyp < 0 || swptyp >= PAGING_MAX_MMSWP || mswp[swptyp].storage == NULL)
+  if (swptyp < 0 || swptyp >= PAGING_MAX_MMSWP ||
+      caller->krnl->mswp[swptyp] == NULL ||
+      caller->krnl->mswp[swptyp]->storage == NULL)
     return -1;
 
   addr_t ram_fpn;
-  /* Thử xin khung trang rảnh từ RAM */
-  if (MEMPHY_get_freefp(caller->krnl->mram, &ram_fpn) != 0)
-  {
-    /* RAM đã đầy: tìm trang nạn nhân theo giải thuật FIFO */
-    addr_t vicpgn;
-    if (find_victim_page(caller->mm, &vicpgn) != 0)
-      return -1;
-
-    addr_t vicpte = pte_get_entry(caller->mm, vicpgn, caller);
-    if (!PAGING_PAGE_PRESENT(vicpte))
-      return -1;
-
-    addr_t vicfpn = PAGING_PTE_FPN(vicpte);
-
-    /* Tìm khung trang rảnh trên các thiết bị SWAP khả dụng */
-    int free_swptyp = -1;
-    addr_t free_swpoff = 0;
-    for (int i = 0; i < PAGING_MAX_MMSWP; i++)
-    {
-      if (mswp[i].storage != NULL && mswp[i].free_fp_list != NULL)
-      {
-        if (MEMPHY_get_freefp(&mswp[i], &free_swpoff) == 0)
-        {
-          free_swptyp = i;
-          break;
-        }
-      }
-    }
-
-    if (free_swptyp == -1)
-    {
-      /* Không còn chỗ trên SWAP: đưa lại trang nạn nhân vào hàng đợi */
-      enlist_pgn_node(&caller->mm->fifo_pgn, vicpgn);
-      return -1;
-    }
-
-    /* Chép dữ liệu trang nạn nhân từ RAM sang SWAP */
-    if (__swap_cp_page(caller->krnl->mram, vicfpn, &mswp[free_swptyp], free_swpoff) != 0)
-    {
-      MEMPHY_put_freefp(&mswp[free_swptyp], free_swpoff);
-      enlist_pgn_node(&caller->mm->fifo_pgn, vicpgn);
-      return -1;
-    }
-
-    /* Cập nhật PTE trang nạn nhân: Swapped = 1, Present = 0 */
-    pte_set_swap(caller, vicpgn, free_swptyp, free_swpoff);
-
-    /* Tái sử dụng khung RAM của trang nạn nhân cho trang cần nạp */
-    ram_fpn = vicfpn;
-  }
+  /* Xin khung trang RAM (tự động hoán trang FIFO sang SWAP nếu RAM đầy) */
+  if (MEMPHY_get_freefp_with_swap(caller, &ram_fpn) != 0)
+    return -1;
 
   /* Sao chép dữ liệu từ thiết bị SWAP vào khung RAM */
-  if (__swap_cp_page(&mswp[swptyp], swpoff, caller->krnl->mram, ram_fpn) != 0)
+  if (__swap_cp_page(caller->krnl->mswp[swptyp], swpoff, caller->krnl->mram, ram_fpn) != 0)
   {
     MEMPHY_put_freefp(caller->krnl->mram, ram_fpn);
     return -1;
   }
 
   /* Giải phóng khung trang cũ trên thiết bị SWAP */
-  MEMPHY_put_freefp(&mswp[swptyp], swpoff);
+  MEMPHY_put_freefp(caller->krnl->mswp[swptyp], swpoff);
 
   /* Cập nhật lại mục bảng trang: Present = 1, Swapped = 0, lưu FPN */
   pte_set_fpn(caller->mm, pgn, ram_fpn, caller);
@@ -493,23 +443,12 @@ static void remove_pgn_node(struct pgn_t **list, addr_t pgn)
  */
 int vunmap_page_range(struct pcb_t *caller, addr_t start, addr_t end)
 {
-  if (caller == NULL || caller->mm == NULL || caller->krnl == NULL || caller->krnl->mram == NULL)
+  if (caller == NULL || caller->mm == NULL || caller->krnl == NULL ||
+      caller->krnl->mram == NULL || end <= start)
     return -1;
 
-  addr_t start_addr = start;
-  addr_t end_addr = end;
-
-  /* Hỗ trợ trường hợp end được truyền vào là số lượng trang (pgnum) */
-  if (end_addr <= start_addr)
-  {
-    if (end_addr > 0 && end_addr <= PAGING64_MAX_PGN)
-      end_addr = start_addr + end_addr * PAGING64_PAGESZ;
-    else
-      return -1;
-  }
-
-  addr_t first_pgn = start_addr >> PAGING64_ADDR_PT_SHIFT;
-  addr_t last_pgn = (end_addr - 1) >> PAGING64_ADDR_PT_SHIFT;
+  addr_t first_pgn = start >> PAGING64_ADDR_PT_SHIFT;
+  addr_t last_pgn = (end - 1) >> PAGING64_ADDR_PT_SHIFT;
 
   for (addr_t pgn = first_pgn; pgn <= last_pgn; pgn++)
   {
@@ -528,9 +467,12 @@ int vunmap_page_range(struct pcb_t *caller, addr_t start, addr_t end)
     {
       int swptyp = PAGING_PTE_SWPTYP(pte);
       addr_t swpoff = PAGING_PTE_SWP(pte);
-      if (swptyp >= 0 && swptyp < PAGING_MAX_MMSWP && mswp[swptyp].storage != NULL)
+      if (caller->krnl->mswp != NULL &&
+          swptyp >= 0 && swptyp < PAGING_MAX_MMSWP &&
+          caller->krnl->mswp[swptyp] != NULL &&
+          caller->krnl->mswp[swptyp]->storage != NULL)
       {
-        MEMPHY_put_freefp(&mswp[swptyp], swpoff);
+        MEMPHY_put_freefp(caller->krnl->mswp[swptyp], swpoff);
       }
     }
 
@@ -551,11 +493,17 @@ int vmap_pgd_memset(struct pcb_t *caller,           // process call
                     addr_t addr,                       // start address which is aligned to pagesz
                     int pgnum)                      // num of mapping page
 {
-  //int pgit = 0;
-  //uint64_t pattern = 0xdeadbeef;
+  if (caller == NULL || caller->mm == NULL || pgnum <= 0)
+    return -1;
 
-  /* TODO memset the page table with given pattern
-   */
+  addr_t pgn = addr >> PAGING64_ADDR_PT_SHIFT;
+  uint64_t pattern = 0xdeadbeef;
+
+  for (int pgit = 0; pgit < pgnum; pgit++)
+  {
+    if (pte_set_entry(caller->mm, pgn + pgit, pattern, caller) != 0)
+      return -1;
+  }
 
   return 0;
 }
@@ -578,7 +526,6 @@ addr_t vmap_page_range(struct pcb_t *caller,           // process call
 
   if (ret_rg != NULL)
   {
-    ret_rg->vmaid = 0;
     ret_rg->rg_start = addr;
     ret_rg->rg_end = addr + (addr_t)pgnum * PAGING64_PAGESZ;
     ret_rg->rg_next = NULL;
@@ -616,7 +563,7 @@ addr_t alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_st
 
   for (pgit = 0; pgit < req_pgnum; pgit++)
   {
-    if (MEMPHY_get_freefp(caller->krnl->mram, &fpn) != 0)
+    if (MEMPHY_get_freefp_with_swap(caller, &fpn) != 0)
     {
       while (*frm_lst != NULL)
       {
@@ -625,7 +572,7 @@ addr_t alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_st
         MEMPHY_put_freefp(caller->krnl->mram, tmp->fpn);
         free(tmp);
       }
-      return -3000;
+      return (addr_t)-3000;
     }
 
     newfp_str = malloc(sizeof(struct framephy_struct));
@@ -669,15 +616,15 @@ addr_t alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_st
 addr_t vm_map_ram(struct pcb_t *caller, addr_t astart, addr_t aend, addr_t mapstart, int incpgnum, struct vm_rg_struct *ret_rg)
 {
   struct framephy_struct *frm_lst = NULL;
-  int ret_alloc = 0;
+  addr_t ret_alloc = 0;
 
   if (caller == NULL || incpgnum <= 0)
-    return -1;
+    return (addr_t)-1;
 
   ret_alloc = alloc_pages_range(caller, incpgnum, &frm_lst);
 
-  if (ret_alloc < 0)
-    return -1;
+  if (ret_alloc == (addr_t)-1 || ret_alloc == (addr_t)-3000)
+    return (addr_t)-1;
 
   vmap_page_range(caller, mapstart, incpgnum, frm_lst, ret_rg);
 
@@ -716,7 +663,13 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller)
   vma0->vm_start = 0;
   vma0->vm_end = vma0->vm_start;
   vma0->sbrk = vma0->vm_start;
+  vma0->vm_freerg_list = NULL;
   struct vm_rg_struct *first_rg = init_vm_rg(vma0->vm_start, vma0->vm_end);
+  if (first_rg == NULL)
+  {
+    free(vma0);
+    return -1;
+  }
   enlist_vm_rg_node(&vma0->vm_freerg_list, first_rg);
 
   vma0->vm_next = NULL;
@@ -763,19 +716,8 @@ int enlist_pgn_node(struct pgn_t **plist, addr_t pgn)
     return -1;
 
   pnode->pgn = pgn;
-  pnode->pg_next = NULL;
-
-  if (*plist == NULL)
-  {
-    *plist = pnode;
-  }
-  else
-  {
-    curr = *plist;
-    while (curr->pg_next != NULL)
-      curr = curr->pg_next;
-    curr->pg_next = pnode;
-  }
+  pnode->pg_next = *plist;
+  *plist = pnode;
 
   return 0;
 }
@@ -870,8 +812,11 @@ int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
           {
             addr_t pte = pt_tbl[i1];
             if (pte == 0) continue;
-            addr_t pgn = ((addr_t)i5 << 36) | ((addr_t)i4 << 27) |
-                         ((addr_t)i3 << 18) | ((addr_t)i2 << 9) | (addr_t)i1;
+            addr_t pgn = ((addr_t)i5 << (PAGING64_ADDR_PGD_LOBIT - PAGING64_ADDR_PT_SHIFT)) |
+                         ((addr_t)i4 << (PAGING64_ADDR_P4D_LOBIT - PAGING64_ADDR_PT_SHIFT)) |
+                         ((addr_t)i3 << (PAGING64_ADDR_PUD_LOBIT - PAGING64_ADDR_PT_SHIFT)) |
+                         ((addr_t)i2 << (PAGING64_ADDR_PMD_LOBIT - PAGING64_ADDR_PT_SHIFT)) |
+                         (addr_t)i1;
             addr_t va = pgn << PAGING64_ADDR_PT_SHIFT;
             if (PAGING_PAGE_PRESENT(pte))
             {
@@ -890,6 +835,146 @@ int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
     }
   }
   printf("==========================================\n");
+  return 0;
+}
+
+/*
+ * print_pgtbl_stats - Thống kê số lượng bảng phân trang 5 cấp và chi phí RAM tiêu tốn
+ * @caller: PCB của tiến trình cần thống kê
+ * Return: 0 nếu thành công, -1 nếu lỗi
+ */
+int print_pgtbl_stats(struct pcb_t *caller)
+{
+  if (caller == NULL || caller->mm == NULL || caller->mm->pgd == NULL)
+    return -1;
+
+  unsigned long pgd_cnt = 1;
+  unsigned long p4d_cnt = 0;
+  unsigned long pud_cnt = 0;
+  unsigned long pmd_cnt = 0;
+  unsigned long pt_cnt = 0;
+  unsigned long ram_pages = 0;
+  unsigned long swp_pages = 0;
+
+  addr_t *pgd_tbl = (addr_t *)caller->mm->pgd;
+  for (int i5 = 0; i5 < PAGING64_DIR_ENTRIES; i5++)
+  {
+    if (pgd_tbl[i5] == 0) continue;
+    p4d_cnt++;
+    addr_t *p4d_tbl = (addr_t *)pgd_tbl[i5];
+    for (int i4 = 0; i4 < PAGING64_DIR_ENTRIES; i4++)
+    {
+      if (p4d_tbl[i4] == 0) continue;
+      pud_cnt++;
+      addr_t *pud_tbl = (addr_t *)p4d_tbl[i4];
+      for (int i3 = 0; i3 < PAGING64_DIR_ENTRIES; i3++)
+      {
+        if (pud_tbl[i3] == 0) continue;
+        pmd_cnt++;
+        addr_t *pmd_tbl = (addr_t *)pud_tbl[i3];
+        for (int i2 = 0; i2 < PAGING64_DIR_ENTRIES; i2++)
+        {
+          if (pmd_tbl[i2] == 0) continue;
+          pt_cnt++;
+          addr_t *pt_tbl = (addr_t *)pmd_tbl[i2];
+          for (int i1 = 0; i1 < PAGING64_DIR_ENTRIES; i1++)
+          {
+            addr_t pte = pt_tbl[i1];
+            if (pte == 0) continue;
+            if (PAGING_PAGE_PRESENT(pte))
+              ram_pages++;
+            else if (pte & PAGING_PTE_SWAPPED_MASK)
+              swp_pages++;
+          }
+        }
+      }
+    }
+  }
+
+  unsigned long total_tables = pgd_cnt + p4d_cnt + pud_cnt + pmd_cnt + pt_cnt;
+  unsigned long long single_table_bytes = (unsigned long long)PAGING64_DIR_ENTRIES * sizeof(addr_t);
+  unsigned long long total_bytes = (unsigned long long)total_tables * single_table_bytes;
+  unsigned long long flat_1level_bytes =
+      (1ULL << (PAGING64_CPU_BUS_WIDTH - PAGING64_ADDR_PT_SHIFT)) * sizeof(addr_t);
+
+  printf("=== 5-Level Page Table Stats for PID %d ===\n", caller->pid);
+  printf("  Tables allocated: PGD=%lu, P4D=%lu, PUD=%lu, PMD=%lu, PT=%lu (Total=%lu)\n",
+         pgd_cnt, p4d_cnt, pud_cnt, pmd_cnt, pt_cnt, total_tables);
+  printf("  Mapped pages    : RAM=%lu, SWAP=%lu (Total=%lu)\n",
+         ram_pages, swp_pages, ram_pages + swp_pages);
+  printf("  5-level RAM cost: %llu bytes (%llu KB)\n",
+         total_bytes, total_bytes / 1024ULL);
+  printf("  Flat 1-level (57-bit VA): %llu GB\n",
+         flat_1level_bytes / (1024ULL * 1024ULL * 1024ULL));
+  printf("===========================================\n");
+  return 0;
+}
+
+/*
+ * cleanup_mm - Giải phóng toàn bộ bảng phân trang 5 cấp, danh sách FIFO và VMA của tiến trình
+ * @mm: con trỏ cấu trúc quản lý bộ nhớ của tiến trình
+ * Return: 0 nếu thành công, -1 nếu lỗi
+ */
+int cleanup_mm(struct mm_struct *mm)
+{
+  if (mm == NULL)
+    return -1;
+
+  if (mm->pgd != NULL)
+  {
+    addr_t *pgd_tbl = (addr_t *)mm->pgd;
+    for (int i5 = 0; i5 < PAGING64_DIR_ENTRIES; i5++)
+    {
+      if (pgd_tbl[i5] == 0) continue;
+      addr_t *p4d_tbl = (addr_t *)pgd_tbl[i5];
+      for (int i4 = 0; i4 < PAGING64_DIR_ENTRIES; i4++)
+      {
+        if (p4d_tbl[i4] == 0) continue;
+        addr_t *pud_tbl = (addr_t *)p4d_tbl[i4];
+        for (int i3 = 0; i3 < PAGING64_DIR_ENTRIES; i3++)
+        {
+          if (pud_tbl[i3] == 0) continue;
+          addr_t *pmd_tbl = (addr_t *)pud_tbl[i3];
+          for (int i2 = 0; i2 < PAGING64_DIR_ENTRIES; i2++)
+          {
+            if (pmd_tbl[i2] == 0) continue;
+            free((void *)pmd_tbl[i2]);
+          }
+          free(pmd_tbl);
+        }
+        free(pud_tbl);
+      }
+      free(p4d_tbl);
+    }
+    free(pgd_tbl);
+    mm->pgd = NULL;
+  }
+
+  struct pgn_t *pgn = mm->fifo_pgn;
+  while (pgn != NULL)
+  {
+    struct pgn_t *next = pgn->pg_next;
+    free(pgn);
+    pgn = next;
+  }
+  mm->fifo_pgn = NULL;
+
+  struct vm_area_struct *vma = mm->mmap;
+  while (vma != NULL)
+  {
+    struct vm_rg_struct *rg = vma->vm_freerg_list;
+    while (rg != NULL)
+    {
+      struct vm_rg_struct *next_rg = rg->rg_next;
+      free(rg);
+      rg = next_rg;
+    }
+    struct vm_area_struct *next_vma = vma->vm_next;
+    free(vma);
+    vma = next_vma;
+  }
+  mm->mmap = NULL;
+
   return 0;
 }
 

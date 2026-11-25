@@ -41,7 +41,7 @@ struct vm_area_struct *get_vma_by_num(struct mm_struct *mm, int vmaid)
 
   }
 
-  return pvma;
+  return (pvma != NULL && pvma->vm_id == vmaid) ? pvma : NULL;
 }
 
 int __mm_swap_page(struct pcb_t *caller, addr_t vicfpn , addr_t swpfpn)
@@ -167,6 +167,7 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
 
   /* TODO: Obtain the new vm area based on vmaid */
   addr_t old_sbrk = cur_vma->sbrk;
+  addr_t old_vm_end = cur_vma->vm_end;
   cur_vma->sbrk = newrg->rg_end;
   cur_vma->vm_end = newrg->rg_end;
   free(newrg);
@@ -177,8 +178,13 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, addr_t inc_sz)
   int incpgnum = (int)(alignedsz / PAGING_PAGESZ);
 #endif
   struct vm_rg_struct ret_rg;
-  if (vm_map_ram(caller, old_sbrk, cur_vma->sbrk, old_sbrk, incpgnum, &ret_rg) < 0)
+  ret_rg.vmaid = vmaid;
+  if (vm_map_ram(caller, old_sbrk, cur_vma->sbrk, old_sbrk, incpgnum, &ret_rg) == (addr_t)-1)
+  {
+    cur_vma->sbrk = old_sbrk;
+    cur_vma->vm_end = old_vm_end;
     return -1;
+  }
 
   return 0;
 }
