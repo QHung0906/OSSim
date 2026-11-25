@@ -82,6 +82,27 @@ static void * cpu_routine(void * args) {
 			printf("\tCPU %d: Processed %2d has finished\n",
 				id ,proc->pid);
 			finish_proc(proc);
+#ifdef MM_PAGING
+#ifdef MM64
+			if (proc->mm != NULL) {
+				print_pgtbl_stats(proc);
+				free_pcb_memph(proc);
+				cleanup_mm(proc->mm);
+				free(proc->mm);
+				proc->mm = NULL;
+			}
+#endif
+#endif
+			if (proc->code != NULL) {
+				if (proc->code->text != NULL)
+					free(proc->code->text);
+				free(proc->code);
+				proc->code = NULL;
+			}
+			if (proc->page_table != NULL) {
+				free(proc->page_table);
+				proc->page_table = NULL;
+			}
 			free(proc);
 			proc = get_proc();
 			time_left = 0;
@@ -279,21 +300,24 @@ int main(int argc, char * argv[]) {
 
 	struct memphy_struct mram;
 	struct memphy_struct mswp[PAGING_MAX_MMSWP];
+	struct memphy_struct *mswp_ptrs[PAGING_MAX_MMSWP];
 
 	/* Create MEM RAM */
 	init_memphy(&mram, memramsz, rdmflag);
 
         /* Create all MEM SWAP */ 
 	int sit;
-	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++)
+	for(sit = 0; sit < PAGING_MAX_MMSWP; sit++) {
 	       init_memphy(&mswp[sit], memswpsz[sit], rdmflag);
+	       mswp_ptrs[sit] = &mswp[sit];
+	}
 
 	/* In Paging mode, it needs passing the system mem to each PCB through loader*/
 	struct mmpaging_ld_args *mm_ld_args = (struct mmpaging_ld_args*)malloc(sizeof(struct mmpaging_ld_args));
 
 	mm_ld_args->timer_id = ld_event;
 	mm_ld_args->mram = (struct memphy_struct *) &mram;
-	mm_ld_args->mswp = (struct memphy_struct**) &mswp;
+	mm_ld_args->mswp = mswp_ptrs;
 	mm_ld_args->active_mswp = (struct memphy_struct *) &mswp[0];
         mm_ld_args->active_mswp_id = 0;
 
@@ -336,6 +360,25 @@ int main(int argc, char * argv[]) {
 #endif
 
 	rtl_dma_cleanup_simulation();
+
+#ifdef MM_PAGING
+	MEMPHY_print_stats();
+	MEMPHY_cleanup(&mram);
+	for (sit = 0; sit < PAGING_MAX_MMSWP; sit++) {
+		MEMPHY_cleanup(&mswp[sit]);
+	}
+	if (os.mm != NULL) {
+#ifdef MM64
+		cleanup_mm(os.mm);
+#endif
+		free(os.mm);
+		os.mm = NULL;
+	}
+	if (os.krnl_pgd != NULL) {
+		free(os.krnl_pgd);
+		os.krnl_pgd = NULL;
+	}
+#endif
 
 	return 0;
 

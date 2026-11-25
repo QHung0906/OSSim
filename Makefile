@@ -102,7 +102,7 @@ $(OBJ)/dma_c_testbench_dma.o: src/dma_c_testbench.cpp ${HEADER} $(OBJ)
 syscalltbl.lst: $(SRC)/syscall.tbl
 	@echo $(OS_OBJ)
 	chmod +x $(SRC)/syscalltbl.sh
-	$(SRC)/syscalltbl.sh $< $(SRC)/$@
+	sh $(SRC)/syscalltbl.sh $< $(SRC)/$@
 #	mv $(OBJ)/syscalltbl.lst $(INCLUDE)/
 
 # Compile the whole OS simulation
