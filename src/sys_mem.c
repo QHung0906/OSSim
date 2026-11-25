@@ -66,13 +66,16 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
    switch (memop) {
    case SYSMEM_MAP_OP:
             /* Reserved process case*/
-			vmap_pgd_memset(caller, regs->a2, regs->a3);
+            if (vmap_pgd_memset(caller, regs->a2, regs->a3) != 0)
+                return -1;
             break;
    case SYSMEM_INC_OP:
-            inc_vma_limit(caller, regs->a2, regs->a3);
+            if (inc_vma_limit(caller, regs->a2, regs->a3) != 0)
+                return -1;
             break;
    case SYSMEM_SWP_OP:
-            __mm_swap_page(caller, regs->a2, regs->a3);
+            if (__mm_swap_page(caller, regs->a2, regs->a3) != 0)
+                return -1;
             break;
    case SYSMEM_IO_READ:
             if (krnl->mram == NULL) return -1;
@@ -90,7 +93,8 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
             
             break;
    case SYSMEM_FREE_OP:
-            vunmap_page_range(caller, regs->a2, regs->a3);
+            if (vunmap_page_range(caller, regs->a2, regs->a3) != 0)
+                return -1;
             break;
    default:
             printf("Memop code: %d\n", memop);
