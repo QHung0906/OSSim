@@ -73,9 +73,8 @@ int get_pd_from_address(addr_t addr, addr_t* pgd, addr_t* p4d, addr_t* pud, addr
 	*p4d = (addr&PAGING64_ADDR_P4D_MASK)>>PAGING64_ADDR_P4D_LOBIT;
 	*pud = (addr&PAGING64_ADDR_PUD_MASK)>>PAGING64_ADDR_PUD_LOBIT;
 	*pmd = (addr&PAGING64_ADDR_PMD_MASK)>>PAGING64_ADDR_PMD_LOBIT;
-	*pt = (addr&PAGING64_ADDR_PT_MASK)>>PAGING64_ADDR_PT_LOBIT;
+	*pt = (addr_t)((addr&PAGING64_ADDR_PT_MASK)>>PAGING64_ADDR_PT_LOBIT);
 
-	/* TODO: implement the page direactories mapping */
   if (((addr >> (PAGING64_ADDR_PGD_HIBIT + 1)) != 0) &&
       ((addr >> (PAGING64_ADDR_PGD_HIBIT + 1)) !=
   (((addr_t)1 << (64 - PAGING64_ADDR_PGD_HIBIT - 1)) - 1)))
@@ -123,7 +122,6 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
   addr_t pmd=0;
   addr_t pt=0;
 
-#ifdef MM64	
   addr_t *p4d_table;
   addr_t *pud_table;
   addr_t *pmd_table;
@@ -146,11 +144,6 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
   pt_table = (addr_t *)pmd_table[pmd];
   if (pt_table == NULL) return -1;
   pte = &pt_table[pt];
-#else
-  struct krnl_t *krnl = (caller->pid > 0 && caller->pid < 100000) ? caller->krnl : NULL;
-  if (krnl == NULL || krnl->mm == NULL) return -1;
-  pte = &krnl->mm->pgd[pgn];
-#endif
 	
   CLRBIT(*pte, PAGING_PTE_PRESENT_MASK);
   SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
@@ -181,7 +174,6 @@ int pte_set_fpn(struct mm_struct *mm, addr_t pgn, addr_t fpn, struct pcb_t *call
   addr_t pmd=0;
   addr_t pt=0;
 
-#ifdef MM64	
   addr_t *p4d_table;
   addr_t *pud_table;
   addr_t *pmd_table;
@@ -204,11 +196,6 @@ int pte_set_fpn(struct mm_struct *mm, addr_t pgn, addr_t fpn, struct pcb_t *call
   pt_table = (addr_t *)pmd_table[pmd];
   if (pt_table == NULL) return -1;
   pte = &pt_table[pt];
-#else
-  struct krnl_t *krnl = caller != NULL ? caller->krnl : NULL;
-  if (krnl == NULL || krnl->mm == NULL) return -1;
-  pte = &krnl->mm->pgd[pgn];
-#endif
 
   SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
   CLRBIT(*pte, PAGING_PTE_SWAPPED_MASK);
@@ -238,7 +225,6 @@ addr_t pte_get_entry(struct mm_struct *mm, addr_t pgn, struct pcb_t *caller)
   addr_t pmd=0;
   addr_t pt=0;
 
-#ifdef MM64	
   addr_t *p4d_table;
   addr_t *pud_table;
   addr_t *pmd_table;
@@ -255,12 +241,6 @@ addr_t pte_get_entry(struct mm_struct *mm, addr_t pgn, struct pcb_t *caller)
   pt_table = (addr_t *)pmd_table[pmd];
   if (pt_table == NULL) return 0;
   return pt_table[pt];
-#else	
-  struct krnl_t *krnl = caller != NULL ? caller->krnl : NULL;
-  if (krnl == NULL || krnl->mm == NULL)
-    return 0;
-  return krnl->mm->pgd[pgn];
-#endif
 }
 
 /* Set PTE page table entry
@@ -281,7 +261,6 @@ int pte_set_entry(struct mm_struct *mm, addr_t pgn, uint64_t pte_val, struct pcb
   addr_t pmd=0;
   addr_t pt=0;
 
-#ifdef MM64	
   addr_t *p4d_table;
   addr_t *pud_table;
   addr_t *pmd_table;
@@ -304,12 +283,6 @@ int pte_set_entry(struct mm_struct *mm, addr_t pgn, uint64_t pte_val, struct pcb
   pt_table = (addr_t *)pmd_table[pmd];
   if (pt_table == NULL) return -1;
   pt_table[pt] = (addr_t)pte_val;
-#else	
-  struct krnl_t *krnl = caller != NULL ? caller->krnl : NULL;
-  if (krnl == NULL || krnl->mm == NULL)
-    return -1;
-  krnl->mm->pgd[pgn] = (addr_t)pte_val;
-#endif
 
   return 0;
 }
