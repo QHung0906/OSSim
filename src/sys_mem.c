@@ -24,9 +24,12 @@
 
 int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
 {
+    if (krnl == NULL || regs == NULL || krnl->running_list == NULL)
+        return -1;
+
    int memop = regs->a1;
    BYTE value;
-   struct pcb_t* caller = NULL;
+   
    /* 
     * TODO THIS DUMMY CREATE EMPTY PROC TO AVOID COMPILER NOTIFY 
     *      need to be eliminated
@@ -47,9 +50,11 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
     /* user process are not allowed to access directly pcb in kernel space of syscall */
     //....
 
+   struct pcb_t* caller = NULL;
    for (int i = 0; i < krnl->running_list->size; i++) {
-       if (krnl->running_list->proc[i] != NULL && krnl->running_list->proc[i]->pid == pid) {
-           caller = krnl->running_list->proc[i];
+       struct pcb_t* proc = krnl->running_list->proc[i];
+       if (proc != NULL && proc->pid == pid) {
+           caller = proc;
            break;
        }
    }
@@ -70,18 +75,26 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
             __mm_swap_page(caller, regs->a2, regs->a3);
             break;
    case SYSMEM_IO_READ:
-            MEMPHY_read(krnl->mram, regs->a2, &value);
+            if (krnl->mram == NULL) return -1;
+
+            if (MEMPHY_read(krnl->mram, regs->a2, &value) != 0)
+                return -1;
+
             regs->a3 = value;
             break;
    case SYSMEM_IO_WRITE:
-            MEMPHY_write(krnl->mram, regs->a2, regs->a3);
+            if (krnl->mram == NULL) return -1;
+    
+            if (MEMPHY_write(krnl->mram, regs->a2, regs->a3) != 0)
+                return -1;
+            
             break;
    case SYSMEM_FREE_OP:
-            
+            vunmap_page_range(caller, regs->a2, regs->a3);
             break;
    default:
             printf("Memop code: %d\n", memop);
-            break;
+            return -1;
    }
    
    return 0;
