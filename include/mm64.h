@@ -66,5 +66,7 @@
 addr_t translate_address(struct pcb_t *caller, addr_t vaddr);
 int handle_page_fault(struct pcb_t *caller, addr_t pgn);
 int vunmap_page_range(struct pcb_t *caller, addr_t start, addr_t end);
+int print_pgtbl_stats(struct pcb_t *caller);
+int cleanup_mm(struct mm_struct *mm);
 
 #endif

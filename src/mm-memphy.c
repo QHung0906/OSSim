@@ -219,8 +219,24 @@ int MEMPHY_dump(struct memphy_struct *mp)
 
 int init_memphy(struct memphy_struct *mp, addr_t max_size, int randomflg)
 {
-   mp->storage = (BYTE *)malloc(max_size * sizeof(BYTE));
+   if (mp == NULL)
+      return -1;
+
+   mp->free_fp_list = NULL;
+   mp->used_fp_list = NULL;
    mp->maxsz = max_size;
+   mp->rdmflg = (randomflg != 0) ? 1 : 0;
+   mp->cursor = 0;
+
+   if (max_size == 0)
+   {
+      mp->storage = NULL;
+      return 0;
+   }
+
+   mp->storage = (BYTE *)malloc(max_size * sizeof(BYTE));
+   if (mp->storage == NULL)
+      return -1;
    memset(mp->storage, 0, max_size * sizeof(BYTE));
 
 #ifdef MM64
@@ -228,11 +244,6 @@ int init_memphy(struct memphy_struct *mp, addr_t max_size, int randomflg)
 #else
    MEMPHY_format(mp, PAGING_PAGESZ);
 #endif
-
-   mp->rdmflg = (randomflg != 0) ? 1 : 0;
-
-   if (!mp->rdmflg)
-      mp->cursor = 0;
 
    return 0;
 }
@@ -309,21 +320,32 @@ int MEMPHY_get_freefp_with_swap(struct pcb_t *caller, addr_t *retfpn)
    if (MEMPHY_get_freefp(mram, retfpn) == 0)
       return 0;
 
-   if (caller->mm == NULL)
+   if (caller->mm == NULL || krnl->mswp == NULL)
       return -1;
 
-   addr_t victim_pgn;
-   if (find_victim_page(caller->mm, &victim_pgn) != 0)
+   addr_t victim_pgn = 0;
+   addr_t victim_pte = 0;
+   int found_victim = 0;
+   while (find_victim_page(caller->mm, &victim_pgn) == 0)
+   {
+      victim_pte = pte_get_entry(caller->mm, victim_pgn, caller);
+      if (PAGING_PAGE_PRESENT(victim_pte))
+      {
+         found_victim = 1;
+         break;
+      }
+   }
+   if (!found_victim)
       return -1;
 
-   addr_t victim_pte = pte_get_entry(caller->mm, victim_pgn, caller);
    addr_t victim_fpn = PAGING_PTE_FPN(victim_pte);
 
    int swp_id = -1;
-   addr_t swp_fpn;
+   addr_t swp_fpn = 0;
    for (int i = 0; i < PAGING_MAX_MMSWP; i++)
    {
-      if (krnl->mswp[i] != NULL && MEMPHY_get_freefp(krnl->mswp[i], &swp_fpn) == 0)
+      if (krnl->mswp[i] != NULL && krnl->mswp[i]->storage != NULL &&
+          MEMPHY_get_freefp(krnl->mswp[i], &swp_fpn) == 0)
       {
          swp_id = i;
          break;
@@ -331,27 +353,31 @@ int MEMPHY_get_freefp_with_swap(struct pcb_t *caller, addr_t *retfpn)
    }
 
    if (swp_id == -1)
+   {
+      enlist_pgn_node(&caller->mm->fifo_pgn, victim_pgn);
       return -1;
+   }
 
    if (__swap_cp_page(mram, victim_fpn, krnl->mswp[swp_id], swp_fpn) != 0)
    {
       MEMPHY_put_freefp(krnl->mswp[swp_id], swp_fpn);
+      enlist_pgn_node(&caller->mm->fifo_pgn, victim_pgn);
       return -1;
    }
 
    if (pte_set_swap(caller, victim_pgn, swp_id, swp_fpn) != 0)
    {
       MEMPHY_put_freefp(krnl->mswp[swp_id], swp_fpn);
+      enlist_pgn_node(&caller->mm->fifo_pgn, victim_pgn);
       return -1;
    }
-
-   MEMPHY_put_freefp(mram, victim_fpn);
 
    pthread_mutex_lock(&mem_lock);
    swap_out_count++;
    pthread_mutex_unlock(&mem_lock);
 
-   return MEMPHY_get_freefp(mram, retfpn);
+   *retfpn = victim_fpn;
+   return 0;
 }
 
 void MEMPHY_print_stats(void)

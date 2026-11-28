@@ -169,11 +169,15 @@ struct vm_area_struct *get_vma_by_num(struct mm_struct *mm, int vmaid);
 
 /* MEM/PHY protypes */
 int MEMPHY_get_freefp(struct memphy_struct *mp, addr_t *fpn);
+int MEMPHY_get_freefp_with_swap(struct pcb_t *caller, addr_t *retfpn);
 int MEMPHY_put_freefp(struct memphy_struct *mp, addr_t fpn);
 int MEMPHY_read(struct memphy_struct * mp, addr_t addr, BYTE *value);
 int MEMPHY_write(struct memphy_struct * mp, addr_t addr, BYTE data);
 int MEMPHY_dump(struct memphy_struct * mp);
 int init_memphy(struct memphy_struct *mp, addr_t max_size, int randomflg);
+void MEMPHY_print_stats(void);
+int MEMPHY_cleanup(struct memphy_struct *mp);
+int free_pcb_memph(struct pcb_t *caller);
 
 /* print list */
 int print_list_fp(struct framephy_struct *fp);

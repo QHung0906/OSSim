@@ -37,34 +37,27 @@
 #include "Vdma_top.h"
 #include "Vdma_top__Dpi.h"  
 
-#if DMA_MAIN == 1
 extern "C" {
 #include "common.h"
 #include "os-mm.h"
 }
-#endif
 
 // RTL Direct Test - Drive Verilator RTL directly
 extern "C" int dpi_rtl_dma_copy(uint64_t src_offset, uint64_t dst_offset, uint64_t length);
 extern "C" int dpi_rtl_dma_is_available(void);
 
 /*
- * dpi_dma_copy - perform DMA copy via DPI
- * src_offset: source memory offset
- * dst_offset: destination memory offset
- * length: number of bytes to copy
+ * dpi_dma_copy_krnl - perform DMA copy via DPI using kernel context
  */
-int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset, uint64_t length) {
+static int dpi_dma_copy_krnl(struct krnl_t *krnl, uint64_t src_offset, uint64_t dst_offset, uint64_t length) {
     void *src = NULL;
     void *dst = NULL;
-    //struct krnl_t *krnl = caller->krnl;
 
     if (memory_bank_is_available()) {
         printf("dma_testbench modeo with dpi_dma_copy from memory bank\n");
         src = memory_bank_get_ptr(src_offset);
         dst = memory_bank_get_ptr(dst_offset);
     } else {
-        struct krnl_t *krnl = caller ? caller->krnl : NULL;
         if (krnl && krnl->mram && krnl->mram->storage) {
             printf("dma_testbench mode with OS memory address\n");
             sysbus_set_ram(krnl->mram->storage, krnl->mram->maxsz);
@@ -144,6 +137,10 @@ int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset,
     return result;
 }
 
+int dpi_dma_copy(struct pcb_t *caller, uint64_t src_offset, uint64_t dst_offset, uint64_t length) {
+    return dpi_dma_copy_krnl(caller ? caller->krnl : NULL, src_offset, dst_offset, length);
+}
+
 pthread_mutex_t dma_lock = PTHREAD_MUTEX_INITIALIZER;
 static std::mutex s_hw_dma_mutex;
 static std::atomic<int> s_active_dma(0);
@@ -161,12 +158,13 @@ extern "C" void rtl_dma_wait_idle(void) {
  * length: number of bytes to copy
  */
 extern "C" int do_dma(struct pcb_t *caller, uint64_t source, uint64_t destination, uint64_t length) {
+    struct krnl_t *krnl = caller ? caller->krnl : NULL;
     s_active_dma++;
 
-    std::thread dma_thread([caller, source, destination, length]() {
+    std::thread dma_thread([krnl, source, destination, length]() {
         {
             std::lock_guard<std::mutex> lock(s_hw_dma_mutex);
-            dpi_dma_copy(caller, source, destination, length);
+            dpi_dma_copy_krnl(krnl, source, destination, length);
         }
         s_active_dma--;
     });
